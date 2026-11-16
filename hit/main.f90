@@ -530,7 +530,6 @@ do t=tstart,tfin
       enddo
    enddo
 
-
    ! AB2 update (first step Euler), in a separate loop (in-place update while reading neighbours would be a race)
    !$acc parallel loop collapse(3) default(present)
    do k=1+halo_ext, piX%shape(3)-halo_ext
@@ -829,10 +828,11 @@ do t=tstart,tfin
                jm=j-1
                km=k-1
                if (im .lt. 1) im=nx
-               ! surface tension force (momentum units)
-               rhsu(i,j,k)=rhsu(i,j,k) + 0.5d0*(fxst(im,j,k)+fxst(i,j,k))
-               rhsv(i,j,k)=rhsv(i,j,k) + 0.5d0*(fyst(i,jm,k)+fyst(i,j,k))
-               rhsw(i,j,k)=rhsw(i,j,k) + 0.5d0*(fzst(i,j,km)+fzst(i,j,k))
+               ! surface tension force at t^{n+1} (curvature from phi^{n+1}), momentum units.
+               ! Kept out of AB2 so that it is balanced with the pressure gradient at t^{n+1} (as in FluTAS, eq. 15)
+               h11 = 0.5d0*(fxst(im,j,k)+fxst(i,j,k))
+               h22 = 0.5d0*(fyst(i,jm,k)+fyst(i,j,k))
+               h33 = 0.5d0*(fzst(i,j,km)+fzst(i,j,k))
                ! face densities at t^n and t^{n+1} (phi not clipped, to keep mass-momentum consistency)
                rhonx = rhoc + drho*0.5d0*(phio(i,j,k) + phio(im,j,k))
                rhony = rhoc + drho*0.5d0*(phio(i,j,k) + phio(i,jm,k))
@@ -840,10 +840,11 @@ do t=tstart,tfin
                rhopx = rhoc + drho*0.5d0*(phi(i,j,k) + phi(im,j,k))
                rhopy = rhoc + drho*0.5d0*(phi(i,j,k) + phi(i,jm,k))
                rhopz = rhoc + drho*0.5d0*(phi(i,j,k) + phi(i,j,km))
-               ! (rho u)* = (rho u)^n + dt*AB2(rhs), then u* = (rho u)*/rho^{n+1} (only point values: no race)
-               u(i,j,k) = (rhonx*u(i,j,k) + dt*(alpha*rhsu(i,j,k)-beta*rhsu_o(i,j,k)))/rhopx
-               v(i,j,k) = (rhony*v(i,j,k) + dt*(alpha*rhsv(i,j,k)-beta*rhsv_o(i,j,k)))/rhopy
-               w(i,j,k) = (rhonz*w(i,j,k) + dt*(alpha*rhsw(i,j,k)-beta*rhsw_o(i,j,k)))/rhopz
+               ! (rho u)* = (rho u)^n + dt*AB2(convection, viscous, forcing) + dt*F_st^{n+1}, then u* = (rho u)*/rho^{n+1}
+               ! (only point values: no race); rhs_o stores the AB2 terms only
+               u(i,j,k) = (rhonx*u(i,j,k) + dt*(alpha*rhsu(i,j,k)-beta*rhsu_o(i,j,k)) + dt*h11)/rhopx
+               v(i,j,k) = (rhony*v(i,j,k) + dt*(alpha*rhsv(i,j,k)-beta*rhsv_o(i,j,k)) + dt*h22)/rhopy
+               w(i,j,k) = (rhonz*w(i,j,k) + dt*(alpha*rhsw(i,j,k)-beta*rhsw_o(i,j,k)) + dt*h33)/rhopz
                rhsu_o(i,j,k)=rhsu(i,j,k)
                rhsv_o(i,j,k)=rhsv(i,j,k)
                rhsw_o(i,j,k)=rhsw(i,j,k)
