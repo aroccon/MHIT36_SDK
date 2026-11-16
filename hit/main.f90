@@ -1,9 +1,4 @@
 #define CHECK_CUDECOMP_EXIT(f) if (f /= CUDECOMP_RESULT_SUCCESS) call exit(1)
-! Mass flux at the u,v,w faces, consistent with the phase-field transport:
-! rho = rhoc + (rhod-rhoc)*phi  ->  F_rho = rhoc*u + (rhod-rhoc)*F_phi  (F_phi: advective - diffusive + sharpening flux)
-#define MFX(a,b,c) (rhoc*u(a,b,c) + drho*fphx(a,b,c))
-#define MFY(a,b,c) (rhoc*v(a,b,c) + drho*fphy(a,b,c))
-#define MFZ(a,b,c) (rhoc*w(a,b,c) + drho*fphz(a,b,c))
 
 program main
 use cudafor
@@ -272,7 +267,7 @@ allocate(phi(piX%shape(1),piX%shape(2),piX%shape(3)),rhsphi_o(piX%shape(1),piX%s
 allocate(normx(piX%shape(1),piX%shape(2),piX%shape(3)),normy(piX%shape(1),piX%shape(2),piX%shape(3)),normz(piX%shape(1),piX%shape(2),piX%shape(3)))
 allocate(fxst(piX%shape(1),piX%shape(2),piX%shape(3)),fyst(piX%shape(1),piX%shape(2),piX%shape(3)),fzst(piX%shape(1),piX%shape(2),piX%shape(3))) ! surface tension forces
 allocate(phio(piX%shape(1),piX%shape(2),piX%shape(3))) ! phi at t^n
-allocate(fphx(piX%shape(1),piX%shape(2),piX%shape(3)),fphy(piX%shape(1),piX%shape(2),piX%shape(3)),fphz(piX%shape(1),piX%shape(2),piX%shape(3))) ! phi fluxes at u,v,w faces
+allocate(mfx(piX%shape(1),piX%shape(2),piX%shape(3)),mfy(piX%shape(1),piX%shape(2),piX%shape(3)),mfz(piX%shape(1),piX%shape(2),piX%shape(3))) ! S, then mass flux rho*u - S, at u,v,w faces
 #endif
 
 ! allocate arrays for transpositions and halo exchanges 
@@ -507,10 +502,6 @@ do t=tstart,tfin
             fzp = w(i,j,kp)*0.5d0*(phi(i,j,kp) + phi(i,j,k))
             fzm =  w(i,j,k)*0.5d0*(phi(i,j,km) + phi(i,j,k))
             rhsphi(i,j,k) = - (fxp - fxm)*dxi  - (fyp - fym)*dxi - (fzp - fzm)*dxi
-            ! total phi flux at the m-faces (u,v,w locations), rhsphi = -div(fph): advective part
-            fphx(i,j,k) = fxm
-            fphy(i,j,k) = fym
-            fphz(i,j,k) = fzm
             ! Diffusion fluxes
             fxp = gamma*eps*(phi(ip,j,k)-phi(i,j,k))*dxi
             fxm = gamma*eps*(phi(i,j,k)-phi(im,j,k))*dxi
@@ -519,9 +510,11 @@ do t=tstart,tfin
             fzp = gamma*eps*(phi(i,j,kp)-phi(i,j,k))*dxi
             fzm = gamma*eps*(phi(i,j,k)-phi(i,j,km))*dxi
             rhsphi(i,j,k) = rhsphi(i,j,k) + (fxp - fxm)*dxi  + (fyp - fym)*dxi + (fzp - fzm)*dxi
-            fphx(i,j,k) = fphx(i,j,k) - fxm
-            fphy(i,j,k) = fphy(i,j,k) - fym
-            fphz(i,j,k) = fphz(i,j,k) - fzm
+            ! artificial mass flux at the m-faces (u,v,w locations), Eq. 10 of Mirjalili & Mani (2021):
+            ! S = (rhod-rhoc)*gamma*(eps*grad(phi) - phi*(1-phi)*n) = (rhod-rhoc)*(diffusive - sharpening phi flux)
+            mfx(i,j,k) = drho*fxm
+            mfy(i,j,k) = drho*fym
+            mfz(i,j,k) = drho*fzm
             ! Sharpening fluxes
             fxp = 0.25d0*gamma*(1.d0-(dtanh(0.25d0*(psidi(ip,j,k)+psidi(i,j,k))*epsi))**2)*0.5d0*(normx(ip,j,k)+normx(i,j,k))
             fxm = 0.25d0*gamma*(1.d0-(dtanh(0.25d0*(psidi(im,j,k)+psidi(i,j,k))*epsi))**2)*0.5d0*(normx(im,j,k)+normx(i,j,k))
@@ -530,9 +523,9 @@ do t=tstart,tfin
             fzp = 0.25d0*gamma*(1.d0-(dtanh(0.25d0*(psidi(i,j,kp)+psidi(i,j,k))*epsi))**2)*0.5d0*(normz(i,j,kp)+normz(i,j,k))
             fzm = 0.25d0*gamma*(1.d0-(dtanh(0.25d0*(psidi(i,j,km)+psidi(i,j,k))*epsi))**2)*0.5d0*(normz(i,j,km)+normz(i,j,k))
             rhsphi(i,j,k) = rhsphi(i,j,k) - (fxp - fxm)*dxi  - (fyp - fym)*dxi - (fzp - fzm)*dxi
-            fphx(i,j,k) = fphx(i,j,k) + fxm
-            fphy(i,j,k) = fphy(i,j,k) + fym
-            fphz(i,j,k) = fphz(i,j,k) + fzm
+            mfx(i,j,k) = mfx(i,j,k) - drho*fxm
+            mfy(i,j,k) = mfy(i,j,k) - drho*fym
+            mfz(i,j,k) = mfz(i,j,k) - drho*fzm
          enddo
       enddo
    enddo
@@ -549,14 +542,32 @@ do t=tstart,tfin
       enddo
    enddo
 
-   ! halos of the phi fluxes (needed by the momentum fluxes)
-   !$acc host_data use_device(fphx,fphy,fphz)
-   CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, fphx, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 2))
-   CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, fphx, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 3))
-   CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, fphy, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 2))
-   CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, fphy, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 3))
-   CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, fphz, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 2))
-   CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, fphz, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 3))
+   ! Mass flux transporting momentum, Eq. 11 of Mirjalili & Mani (2021): rho^n*u^n - S, at the u,v,w faces.
+   ! rho^n at the face is the average of the two cells (phi^n, not clipped): rho^n*u^n is then exactly
+   ! rhoc*u + (rhod-rhoc)*(advective phi flux), so the mass flux is consistent with the phase-field transport.
+   !$acc parallel loop collapse(3) default(present)
+   do k=1+halo_ext, piX%shape(3)-halo_ext
+      do j=1+halo_ext, piX%shape(2)-halo_ext
+         do i=1,nx
+            im=i-1
+            jm=j-1
+            km=k-1
+            if (im .lt. 1) im=nx
+            mfx(i,j,k) = (rhoc + drho*0.5d0*(phio(i,j,k) + phio(im,j,k)))*u(i,j,k) - mfx(i,j,k)
+            mfy(i,j,k) = (rhoc + drho*0.5d0*(phio(i,j,k) + phio(i,jm,k)))*v(i,j,k) - mfy(i,j,k)
+            mfz(i,j,k) = (rhoc + drho*0.5d0*(phio(i,j,k) + phio(i,j,km)))*w(i,j,k) - mfz(i,j,k)
+         enddo
+      enddo
+   enddo
+
+   ! halos of the mass fluxes (needed by the momentum fluxes)
+   !$acc host_data use_device(mfx,mfy,mfz)
+   CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, mfx, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 2))
+   CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, mfx, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 3))
+   CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, mfy, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 2))
+   CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, mfy, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 3))
+   CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, mfz, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 2))
+   CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, mfz, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 3))
    !$acc end host_data
 
 
@@ -671,32 +682,32 @@ do t=tstart,tfin
             if (ip .gt. nx) ip=1  
             if (im .lt. 1) im=nx
             #if phiflag == 1
-            ! Convective term in momentum form: div(F_rho x u), F_rho consistent with the phi transport.
+            ! Convective term in momentum form, Eq. 11 of Mirjalili & Mani (2021): div((rho*u - S) x u), mass flux in mfx,mfy,mfz.
             ! Momentum control volumes are centred on the faces: their mass fluxes are the average of the two
             ! adjacent cells, so the discrete mass balance holds also for the face density 0.5*(rho(i)+rho(im)).
             ! x-momentum (u point, between cells im and i)
-            ge = 0.25d0*(MFX(i,j,k)+MFX(ip,j,k))*(u(i,j,k)+u(ip,j,k))
-            gw = 0.25d0*(MFX(im,j,k)+MFX(i,j,k))*(u(im,j,k)+u(i,j,k))
-            gn = 0.25d0*(MFY(im,jp,k)+MFY(i,jp,k))*(u(i,j,k)+u(i,jp,k))
-            gs = 0.25d0*(MFY(im,j,k)+MFY(i,j,k))*(u(i,jm,k)+u(i,j,k))
-            gt = 0.25d0*(MFZ(im,j,kp)+MFZ(i,j,kp))*(u(i,j,k)+u(i,j,kp))
-            gb = 0.25d0*(MFZ(im,j,k)+MFZ(i,j,k))*(u(i,j,km)+u(i,j,k))
+            ge = 0.25d0*(mfx(i,j,k)+mfx(ip,j,k))*(u(i,j,k)+u(ip,j,k))
+            gw = 0.25d0*(mfx(im,j,k)+mfx(i,j,k))*(u(im,j,k)+u(i,j,k))
+            gn = 0.25d0*(mfy(im,jp,k)+mfy(i,jp,k))*(u(i,j,k)+u(i,jp,k))
+            gs = 0.25d0*(mfy(im,j,k)+mfy(i,j,k))*(u(i,jm,k)+u(i,j,k))
+            gt = 0.25d0*(mfz(im,j,kp)+mfz(i,j,kp))*(u(i,j,k)+u(i,j,kp))
+            gb = 0.25d0*(mfz(im,j,k)+mfz(i,j,k))*(u(i,j,km)+u(i,j,k))
             rhsu(i,j,k) = -(ge-gw+gn-gs+gt-gb)*dxi
             ! y-momentum (v point, between cells jm and j)
-            ge = 0.25d0*(MFX(ip,jm,k)+MFX(ip,j,k))*(v(i,j,k)+v(ip,j,k))
-            gw = 0.25d0*(MFX(i,jm,k)+MFX(i,j,k))*(v(im,j,k)+v(i,j,k))
-            gn = 0.25d0*(MFY(i,j,k)+MFY(i,jp,k))*(v(i,j,k)+v(i,jp,k))
-            gs = 0.25d0*(MFY(i,jm,k)+MFY(i,j,k))*(v(i,jm,k)+v(i,j,k))
-            gt = 0.25d0*(MFZ(i,jm,kp)+MFZ(i,j,kp))*(v(i,j,k)+v(i,j,kp))
-            gb = 0.25d0*(MFZ(i,jm,k)+MFZ(i,j,k))*(v(i,j,km)+v(i,j,k))
+            ge = 0.25d0*(mfx(ip,jm,k)+mfx(ip,j,k))*(v(i,j,k)+v(ip,j,k))
+            gw = 0.25d0*(mfx(i,jm,k)+mfx(i,j,k))*(v(im,j,k)+v(i,j,k))
+            gn = 0.25d0*(mfy(i,j,k)+mfy(i,jp,k))*(v(i,j,k)+v(i,jp,k))
+            gs = 0.25d0*(mfy(i,jm,k)+mfy(i,j,k))*(v(i,jm,k)+v(i,j,k))
+            gt = 0.25d0*(mfz(i,jm,kp)+mfz(i,j,kp))*(v(i,j,k)+v(i,j,kp))
+            gb = 0.25d0*(mfz(i,jm,k)+mfz(i,j,k))*(v(i,j,km)+v(i,j,k))
             rhsv(i,j,k) = -(ge-gw+gn-gs+gt-gb)*dxi
             ! z-momentum (w point, between cells km and k)
-            ge = 0.25d0*(MFX(ip,j,km)+MFX(ip,j,k))*(w(i,j,k)+w(ip,j,k))
-            gw = 0.25d0*(MFX(i,j,km)+MFX(i,j,k))*(w(im,j,k)+w(i,j,k))
-            gn = 0.25d0*(MFY(i,jp,km)+MFY(i,jp,k))*(w(i,j,k)+w(i,jp,k))
-            gs = 0.25d0*(MFY(i,j,km)+MFY(i,j,k))*(w(i,jm,k)+w(i,j,k))
-            gt = 0.25d0*(MFZ(i,j,k)+MFZ(i,j,kp))*(w(i,j,k)+w(i,j,kp))
-            gb = 0.25d0*(MFZ(i,j,km)+MFZ(i,j,k))*(w(i,j,km)+w(i,j,k))
+            ge = 0.25d0*(mfx(ip,j,km)+mfx(ip,j,k))*(w(i,j,k)+w(ip,j,k))
+            gw = 0.25d0*(mfx(i,j,km)+mfx(i,j,k))*(w(im,j,k)+w(i,j,k))
+            gn = 0.25d0*(mfy(i,jp,km)+mfy(i,jp,k))*(w(i,j,k)+w(i,jp,k))
+            gs = 0.25d0*(mfy(i,j,km)+mfy(i,j,k))*(w(i,jm,k)+w(i,j,k))
+            gt = 0.25d0*(mfz(i,j,k)+mfz(i,j,kp))*(w(i,j,k)+w(i,j,kp))
+            gb = 0.25d0*(mfz(i,j,km)+mfz(i,j,k))*(w(i,j,km)+w(i,j,k))
             rhsw(i,j,k) = -(ge-gw+gn-gs+gt-gb)*dxi
             #else
             ! compute the products (conservative form)

@@ -72,9 +72,11 @@ module phase
    double precision :: curv
    double precision :: psidp, psidm, psidc
    double precision, allocatable :: fxst(:,:,:), fyst(:,:,:), fzst(:,:,:)
-   ! consistent mass-momentum transport: phi at t^n and total phi fluxes at the u,v,w faces (t^n)
+   ! consistent mass-momentum transport: phi at t^n and mass fluxes at the u,v,w faces (t^n)
+   ! mfx,mfy,mfz first hold the artificial mass flux S (Mirjalili & Mani 2021, Eq. 10),
+   ! then are converted in place to the mass flux rho*u - S that transports momentum (Eq. 11)
    double precision, allocatable :: phio(:,:,:)
-   double precision, allocatable :: fphx(:,:,:), fphy(:,:,:), fphz(:,:,:)
+   double precision, allocatable :: mfx(:,:,:), mfy(:,:,:), mfz(:,:,:)
 end module phase
 
 
