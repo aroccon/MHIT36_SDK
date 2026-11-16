@@ -8,7 +8,7 @@ module param
     double precision :: rhoc, rhod, drho ! density of carrier and dispersed phase, drho=rhod-rhoc
     double precision :: rho0, rho0i ! reference density for Dodd & Ferrante splitting (min density) and its inverse
     double precision :: mux, muy, muz ! local viscosities
-    integer :: inflow, inphi, insurf, stage
+    integer :: inflow, inphi, stage
     double precision :: f1,f2,f3,k0 ! forcing parameters
     double precision :: radius, sigma, epsr, eps, pos, val, epsi, enum ! phase-field parameters
     double precision :: times,timef
@@ -86,10 +86,6 @@ module phase
    double precision, allocatable :: fxst(:,:,:), fyst(:,:,:), fzst(:,:,:)
 end module phase
 
-module surfactant
-   double precision, allocatable :: surf(:,:,:), rhsurf(:,:,:), q_surf(:,:,:)
-   double precision :: diffs, betas
-end module surfactant
 
 
 

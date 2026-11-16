@@ -3,8 +3,8 @@
 Multi-GPU code for intreface-resolved simulations of multiphase turbulence in homogeneous isotropic turbulence and channel flow configurations.
 The code relies on direct numerical simulation of Navier-Stokes equations coupled with a phase-field method (ACDI) for interface description.
 The code parallerelization relies on the cuDecomp library.
-Variable viscosity and description of insoluble surfactants for PRIN simulations.
-Surfactant module: Work in progress 🚧
+Variable viscosity and density ratio (Dodd & Ferrante pressure splitting with FFT-based Poisson solver).
+Density-ratio module: Work in progress 🚧
 
 
 ~~~text

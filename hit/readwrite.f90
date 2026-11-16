@@ -3,7 +3,6 @@ subroutine writefield(t,fieldn)
 
 use velocity
 use phase
-use surfactant
 use mpi
 use mpivar
 use param
@@ -24,7 +23,6 @@ double precision, allocatable :: out(:,:,:)
 ! fieldn=3 means w
 ! fieldn=4 means p
 ! fieldn=5 means phi
-! fieldn=6 means surf
 
 ! define basic quantities to be used later (gloabl and pencil size)
 g_size=[nx, ny, nz] ! global size
@@ -93,17 +91,6 @@ if (fieldn .eq. 5) then
   call mpi_file_close(f_handle,ierr)
 endif
 
-if (fieldn .eq. 6) then
-  out=surf(1:nx,1+halo_ext:piX%shape(2)-halo_ext,1+halo_ext:piX%shape(3)-halo_ext) !<- out only the inner parts (no halo)
-  write(namefile,'(a,i8.8,a)') './output/surf_',t,'.dat'
-  call mpi_file_open(MPI_COMM_WORLD,namefile,mpi_mode_create+mpi_mode_rdwr,mpi_info_null,f_handle,ierr)
-  call mpi_type_create_subarray(3,g_size,p_size,fstart,mpi_order_fortran,mpi_double_precision,ftype,ierr)
-  call mpi_type_commit(ftype,ierr)
-  call mpi_file_set_view(f_handle,offset,mpi_double_precision,ftype,'native',mpi_info_null,ierr)
-  call mpi_file_write_all(f_handle,out,p_size(1)*p_size(2)*p_size(3),mpi_double_precision,mpi_status_ignore,ierr)
-  call mpi_file_close(f_handle,ierr)
-endif
-
 deallocate(out)
 
 end subroutine
@@ -122,7 +109,6 @@ subroutine readfield(fieldn)
 
 use velocity
 use phase
-use surfactant
 use mpi
 use mpivar
 use param
@@ -143,7 +129,6 @@ double precision, allocatable :: in(:,:,:)
 ! fieldn=3 means w
 ! fieldn=4 means p
 ! fieldn=5 means phi
-! fieldn=6 means surf
 
 
 ! define basic quantities to be used later (gloabl and pencil size)
@@ -213,17 +198,6 @@ if (fieldn .eq. 5) then
   phi(1:nx,1+halo_ext:piX%shape(2)-halo_ext,1+halo_ext:piX%shape(3)-halo_ext)=in !<- read only the inner parts (no halo) u has halos; in no halos
 endif
 
-if (fieldn .eq. 6) then
-  namefile='./input/surf.dat'
-  call mpi_file_open(MPI_COMM_WORLD,namefile,mpi_mode_rdonly,mpi_info_null,f_handle,ierr)
-  call mpi_type_create_subarray(3,g_size,p_size,fstart,mpi_order_fortran,mpi_double_precision,ftype,ierr)
-  call mpi_type_commit(ftype,ierr)
-  call mpi_file_set_view(f_handle,offset,mpi_double_precision,ftype,'native',mpi_info_null,ierr)
-  call mpi_file_read(f_handle,in,p_size(1)*p_size(2)*p_size(3),mpi_double_precision,mpi_status_ignore,ierr)
-  call mpi_file_close(f_handle,ierr)
-  surf(1:nx,1+halo_ext:piX%shape(2)-halo_ext,1+halo_ext:piX%shape(3)-halo_ext)=in !<- read only the inner parts (no halo) u has halos; in no halos
-endif
-
 deallocate(in)
 
 end subroutine
@@ -242,7 +216,6 @@ subroutine readfield_restart(t,fieldn)
 
 use velocity
 use phase
-use surfactant
 use mpi
 use mpivar
 use param
@@ -263,7 +236,6 @@ double precision, allocatable :: in(:,:,:)
 ! fieldn=3 means w
 ! fieldn=4 means p
 ! fieldn=5 means phi
-! fieldn=6 means surf
 
 ! define basic quantities to be used later (gloabl and pencil size)
 g_size=[nx, ny, nz] ! global size
@@ -326,17 +298,6 @@ if (fieldn .eq. 5) then
   call mpi_file_read(f_handle,in,p_size(1)*p_size(2)*p_size(3),mpi_double_precision,mpi_status_ignore,ierr)
   call mpi_file_close(f_handle,ierr)
   phi(1:nx,1+halo_ext:piX%shape(2)-halo_ext,1+halo_ext:piX%shape(3)-halo_ext)=in !<- read only the inner parts (no halo) u has halos; in no halos
-endif
-
-if (fieldn .eq. 6) then
-  write(namefile,'(a,i8.8,a)') './output/surf_',t,'.dat'
-  call mpi_file_open(MPI_COMM_WORLD,namefile,mpi_mode_rdonly,mpi_info_null,f_handle,ierr)
-  call mpi_type_create_subarray(3,g_size,p_size,fstart,mpi_order_fortran,mpi_double_precision,ftype,ierr)
-  call mpi_type_commit(ftype,ierr)
-  call mpi_file_set_view(f_handle,offset,mpi_double_precision,ftype,'native',mpi_info_null,ierr)
-  call mpi_file_read(f_handle,in,p_size(1)*p_size(2)*p_size(3),mpi_double_precision,mpi_status_ignore,ierr)
-  call mpi_file_close(f_handle,ierr)
-  surf(1:nx,1+halo_ext:piX%shape(2)-halo_ext,1+halo_ext:piX%shape(3)-halo_ext)=in !<- read only the inner parts (no halo) u has halos; in no halos
 endif
 
 deallocate(in)

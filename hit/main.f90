@@ -7,7 +7,6 @@ use cufft
 use mpi
 use velocity 
 use phase
-use surfactant
 use particles
 use param
 use mpivar
@@ -55,20 +54,12 @@ integer :: offsets(3), xoff, yoff
 integer :: np(3)
 ! Enable or disable phase field 
 #define phiflag 1
-! Enable or disable surfactant (phase-field must be enabled)
-#define surflag 1
 
 
 
 !########################################################################################################################################
 ! 1. INITIALIZATION OF MPI AND cuDECOMP AUTOTUNING : START
 !########################################################################################################################################
-! safety check
-#if surflag == 1
-#if phiflag == 0
-stop "Phase-field must be enabled to use surfactant; set phiflag to 1 or surflag to 0"
-#endif
-#endif
 ! MPI initialization, put in rank the local MPI rank number and ranks total number
 ! Same procedura defined in the cuDecomp documentation
 call mpi_init(ierr)
@@ -273,10 +264,6 @@ allocate(phi(piX%shape(1),piX%shape(2),piX%shape(3)),q_phi(piX%shape(1),piX%shap
 allocate(normx(piX%shape(1),piX%shape(2),piX%shape(3)),normy(piX%shape(1),piX%shape(2),piX%shape(3)),normz(piX%shape(1),piX%shape(2),piX%shape(3)))
 allocate(fxst(piX%shape(1),piX%shape(2),piX%shape(3)),fyst(piX%shape(1),piX%shape(2),piX%shape(3)),fzst(piX%shape(1),piX%shape(2),piX%shape(3))) ! surface tension forces
 #endif
-!SURF FLAG
-# if surflag == 1
-allocate(surf(piX%shape(1),piX%shape(2),piX%shape(3)),rhsurf(piX%shape(1),piX%shape(2),piX%shape(3)),q_surf(piX%shape(1),piX%shape(2),piX%shape(3)))
-#endif
 
 ! allocate arrays for transpositions and halo exchanges 
 CHECK_CUDECOMP_EXIT(cudecompMalloc(handle, grid_desc, work_d, nElemWork))
@@ -375,46 +362,6 @@ call MPI_Allreduce(umax,gumax,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD, ier
    !$acc end host_data 
 #endif
 
-! initialize surfactant
-#if surflag == 1
-   if (restart .eq. 0) then
-      if (rank.eq.0) write(*,*) 'Initialize surfactant'
-      if (insurf .eq. 0) then
-         if (rank.eq.0) write(*,*) 'Gradient of phi'
-         do k = 1+halo_ext, piX%shape(3)-halo_ext
-            do j = 1+halo_ext, piX%shape(2)-halo_ext
-               do i = 1, piX%shape(1)
-                  ip=i+1 
-                  im=i-1
-                  jp=j+1 
-                  jm=j-1
-                  kp=k+1 
-                  km=k-1
-                  if (ip > nx) ip=1
-                  if (im < 1)  im=nx
-                  val =       (0.5d0*(phi(ip,j,k)-phi(im,j,k))*dxi)**2
-                  val = val + (0.5d0*(phi(i,jp,k)-phi(i,jm,k))*dxi)**2
-                  val = val + (0.5d0*(phi(i,j,kp)-phi(i,j,km))*dxi)**2
-                  surf(i,j,k) = sqrt(val)
-               enddo
-            enddo
-         enddo
-      endif
-      if (inphi .eq. 1) then
-         if (rank.eq.0)  write(*,*) "Initialize surfactant from data"
-         call readfield(6)
-      endif
-   endif
-   if (restart .eq. 1) then
-      if (rank == 0) write(*,*) "Initialize surfactant (restart, from output folder), iteration:", tstart
-      call readfield_restart(tstart,6)
-   endif
-   ! update halo
-   !$acc host_data use_device(surf)
-   CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, surf, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 2))
-   CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, surf, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 3))
-   !$acc end host_data 
-#endif
 
 !Save initial fields (only if a fresh start)
 if (restart .eq. 0) then
@@ -424,9 +371,6 @@ if (restart .eq. 0) then
    call writefield(tstart,3)
    #if phiflag == 1
    call writefield(tstart,5)
-   #endif
-   #if surflag == 1
-   call writefield(tstart,6)
    #endif
 endif
 
@@ -460,7 +404,7 @@ do t=tstart,tfin
     call cpu_time(times)
    
    !########################################################################################################################################
-   ! START STEP 5: PHASE-FIELD SOLVER (RK4 EXPLICIT) PHASE-FIELD + SURFACTANT (IF ENABLED)
+   ! START STEP 5: PHASE-FIELD SOLVER (RK4 EXPLICIT)
    !########################################################################################################################################
    #if phiflag == 1
    ! 4.2 Get phi at n+1 using RK4 + skew-symmetric splitting
@@ -471,9 +415,6 @@ do t=tstart,tfin
       do j=1+halo_ext, piX%shape(2)-halo_ext
          do i=1,nx
             q_phi(i,j,k) = 0.d0
-            #if surflag == 1
-            q_surf(i,j,k) = 0.d0
-            #endif
          enddo
       enddo
    enddo
@@ -484,12 +425,6 @@ do t=tstart,tfin
       CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, phi, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 2))
       CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, phi, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 3))
       !$acc end host_data
-      #if surflag == 1
-      !$acc host_data use_device(surf)
-      CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, surf, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 2))
-      CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, surf, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 3))
-      !$acc end host_data
-      #endif
 
       ! Compute psidi from current phi, in both halo and non halo cells and then the normals
       !$acc kernels
@@ -579,60 +514,14 @@ do t=tstart,tfin
          enddo
       enddo
 
-      ! Same approach for surfactant if enabled 
-      #if surflag == 1
-      !$acc parallel loop collapse(3) default(present)
-      do k=1+halo_ext, piX%shape(3)-halo_ext
-         do j=1+halo_ext, piX%shape(2)-halo_ext
-            do i=1,nx
-               im=i-1
-               ip=i+1 
-               jm=j-1
-               jp=j+1
-               km=k-1 
-               kp=k+1
-               if (ip .gt. nx) ip=1
-               if (im .lt. 1)  im=nx
-               ! Advection fluxes
-               fxp = u(ip,j,k)*0.5d0*(surf(ip,j,k) + surf(i,j,k))
-               fxm =  u(i,j,k)*0.5d0*(surf(im,j,k) + surf(i,j,k))
-               fyp = v(i,jp,k)*0.5d0*(surf(i,jp,k) + surf(i,j,k))
-               fym =  v(i,j,k)*0.5d0*(surf(i,jm,k) + surf(i,j,k))
-               fzp = w(i,j,kp)*0.5d0*(surf(i,j,kp) + surf(i,j,k))
-               fzm =  w(i,j,k)*0.5d0*(surf(i,j,km) + surf(i,j,k))
-               rhsurf(i,j,k) = - (fxp - fxm)*dxi  - (fyp - fym)*dxi - (fzp - fzm)*dxi
-               ! Diffusion fluxes
-               fxp = diffs*(surf(ip,j,k)-surf(i,j,k))*dxi
-               fxm = diffs*(surf(i,j,k)-surf(im,j,k))*dxi
-               fyp = diffs*(surf(i,jp,k)-surf(i,j,k))*dxi
-               fym = diffs*(surf(i,j,k)-surf(i,jm,k))*dxi
-               fzp = diffs*(surf(i,j,kp)-surf(i,j,k))*dxi
-               fzm = diffs*(surf(i,j,k)-surf(i,j,km))*dxi
-               rhsurf(i,j,k) = rhsurf(i,j,k) + (fxp - fxm)*dxi  + (fyp - fym)*dxi + (fzp - fzm)*dxi
-               ! Sharpening fluxes
-               fxp = -2.d0*diffs*(0.5d0 - 0.5d0*(phi(ip,j,k)+phi(i,j,k)))*0.5d0*(normx(ip,j,k)+normx(i,j,k))*0.5d0*(surf(ip,j,k)+surf(i,j,k))*epsi
-               fxm = -2.d0*diffs*(0.5d0 - 0.5d0*(phi(im,j,k)+phi(i,j,k)))*0.5d0*(normx(im,j,k)+normx(i,j,k))*0.5d0*(surf(im,j,k)+surf(i,j,k))*epsi
-               fyp = -2.d0*diffs*(0.5d0 - 0.5d0*(phi(i,jp,k)+phi(i,j,k)))*0.5d0*(normy(i,jp,k)+normy(i,j,k))*0.5d0*(surf(i,jp,k)+surf(i,j,k))*epsi
-               fym = -2.d0*diffs*(0.5d0 - 0.5d0*(phi(i,jm,k)+phi(i,j,k)))*0.5d0*(normy(i,jm,k)+normy(i,j,k))*0.5d0*(surf(i,jm,k)+surf(i,j,k))*epsi
-               fzp = -2.d0*diffs*(0.5d0 - 0.5d0*(phi(i,j,kp)+phi(i,j,k)))*0.5d0*(normz(i,j,kp)+normz(i,j,k))*0.5d0*(surf(i,j,kp)+surf(i,j,k))*epsi
-               fzm = -2.d0*diffs*(0.5d0 - 0.5d0*(phi(i,j,km)+phi(i,j,k)))*0.5d0*(normz(i,j,km)+normz(i,j,k))*0.5d0*(surf(i,j,km)+surf(i,j,k))*epsi
-               rhsurf(i,j,k) = rhsurf(i,j,k) + (fxp - fxm)*dxi  + (fyp - fym)*dxi + (fzp - fzm)*dxi
-            enddo
-         enddo
-      enddo
-      #endif
 
-      ! RK4 update, done after all rhs are computed (in-place update while reading neighbours would be a race)
+      ! RK4 update, in a separate loop (in-place update while reading neighbours would be a race)
       !$acc parallel loop collapse(3) default(present)
       do k=1+halo_ext, piX%shape(3)-halo_ext
          do j=1+halo_ext, piX%shape(2)-halo_ext
             do i=1,nx
                q_phi(i,j,k) = rk4a(stage)*q_phi(i,j,k) + dt*rhsphi(i,j,k)
                phi(i,j,k)   = phi(i,j,k) + rk4b(stage)*q_phi(i,j,k)
-               #if surflag == 1
-               q_surf(i,j,k) = rk4a(stage)*q_surf(i,j,k) + dt*rhsurf(i,j,k)
-               surf(i,j,k)   = surf(i,j,k) + rk4b(stage)*q_surf(i,j,k)
-               #endif
             enddo
          enddo
       enddo
@@ -643,12 +532,6 @@ do t=tstart,tfin
    CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, phi, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 2))
    CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, phi, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 3))
    !$acc end host_data
-   #if surflag == 1
-   !$acc host_data use_device(surf)
-   CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, surf, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 2))
-   CHECK_CUDECOMP_EXIT(cudecompUpdateHalosX(handle, grid_desc, surf, work_halo_d, CUDECOMP_DOUBLE, piX%halo_extents, halo_periods, 3))
-   !$acc end host_data
-   #endif
 
    !$acc parallel loop collapse(3)
    do k=1, piX%shape(3)
@@ -1158,9 +1041,6 @@ do t=tstart,tfin
       !call writefield(t,4)
       #if phiflag == 1
       call writefield(t,5)
-      #endif
-      #if surflag == 1
-      call writefield(t,6)
       #endif
    endif
    !########################################################################################################################################

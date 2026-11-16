@@ -4,7 +4,6 @@
 500        ! Saving frequency
 0           ! inflow condition (0=Taylor green, 1=read from fields)
 0           ! phase-field initial condition (0=circular drop, 1=read from fields)
-0           ! surfactant initial condition (0=nabla phi)
 0.0001      ! dt for the simulation
 0.006       ! muc (viscosity carrier)
 0.006       ! mud (viscosity dispersed)
@@ -17,5 +16,3 @@
 0.5         ! Initial drop radius for phase-field
 0.46d0      ! Surface tension
 0.51        ! Ratio eps/dx
-0.1       ! Surfactant diffusivity
-0.000       ! Elasticity number

@@ -5,7 +5,6 @@ subroutine readinput
 use velocity
 use phase
 use param
-use surfactant
 use mpivar
 use particles
 implicit none
@@ -19,7 +18,6 @@ read(55,*) dump
 !Flow parameters
 read(55,*) inflow
 read(55,*) inphi
-read(55,*) insurf
 read(55,*) dt
 read(55,*) muc
 read(55,*) mud
@@ -34,9 +32,6 @@ read(55,*) k0
 read(55,*) radius
 read(55,*) sigma
 read(55,*) epsr   
-! surfactant parameters
-read(55,*) diffs
-read(55,*) betas
  
 
 ! compute pre-defined constant 
@@ -81,7 +76,6 @@ if (rank .eq. 0) then
     write(*,*) "Radius  ", radius
     write(*,*) "Sigma   ", sigma
     write(*,*) "Eps     ", eps
-    write(*,*) "diffsurf     ", diffs
     write(*,*) "Epsi    ", epsi
     write(*,*) "Lx      ", lx
     write(*,*) "dx", dx

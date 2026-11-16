@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 nx, ny, nz = 128, 128, 128
 
-data = np.fromfile('output/surf_00001000.dat', dtype=np.float64)  # or float64
+data = np.fromfile('output/phi_00001000.dat', dtype=np.float64)  # or float64
 print("Data size:", data.size)
 data = data.reshape((nz, ny, nx))  
 
