@@ -68,7 +68,6 @@ module velocity
    complex(8), allocatable :: rhsp_complex(:,:,:)
    double precision, allocatable :: rhsp(:,:,:), p(:,:,:)
    double precision, allocatable :: pold(:,:,:) ! pressure at previous time step (Dodd & Ferrante extrapolation)
-   double precision, allocatable :: uold(:,:,:), vold(:,:,:), wold(:,:,:) ! velocity at previous time step (u^{n+1/2} extrapolation)
    double precision, allocatable :: rhspp(:,:,:), pp(:,:,:)
    double precision, allocatable :: mu(:,:,:)
    double precision, allocatable :: tau12(:,:,:), tau13(:,:,:), tau23(:,:,:)
@@ -85,10 +84,6 @@ module phase
    double precision :: curv
    double precision :: psidp, psidm, psidc
    double precision, allocatable :: fxst(:,:,:), fyst(:,:,:), fzst(:,:,:)
-   ! consistent mass-momentum transport: phi at t^n, RK4 flux registers and time-integrated phi fluxes (at u,v,w faces)
-   double precision, allocatable :: phio(:,:,:)
-   double precision, allocatable :: qfx(:,:,:), qfy(:,:,:), qfz(:,:,:)
-   double precision, allocatable :: fbx(:,:,:), fby(:,:,:), fbz(:,:,:)
 end module phase
 
 module surfactant
