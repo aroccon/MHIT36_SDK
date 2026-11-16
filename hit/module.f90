@@ -72,6 +72,9 @@ module phase
    double precision :: curv
    double precision :: psidp, psidm, psidc
    double precision, allocatable :: fxst(:,:,:), fyst(:,:,:), fzst(:,:,:)
+   ! consistent mass-momentum transport: phi at t^n and total phi fluxes at the u,v,w faces (t^n)
+   double precision, allocatable :: phio(:,:,:)
+   double precision, allocatable :: fphx(:,:,:), fphy(:,:,:), fphz(:,:,:)
 end module phase
 
 
